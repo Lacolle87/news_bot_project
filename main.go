@@ -13,7 +13,6 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
-	"news_bot_project/logger"
 )
 
 // Замените эти значения на свои
@@ -38,17 +37,11 @@ type Item struct {
 }
 
 func main() {
-	logger := logger.SetupLogger()
-
-	fmt.Println("Программа запущена. Новостной бот начинает работу.")
-
-	if logger == nil {
-		log.Fatal("Ошибка при настройке логгера")
-	}
+	log.Println("Программа запущена. Новостной бот начинает работу.")
 
 	err := godotenv.Load()
 	if err != nil {
-		logger.Fatal("Ошибка при загрузке файла .env")
+		log.Fatal("Ошибка при загрузке файла .env")
 	}
 
 	redisHost = os.Getenv("REDIS_HOST")
@@ -57,20 +50,14 @@ func main() {
 	redisClient := setupRedisClient()
 	defer redisClient.Close()
 
-	err = processNews(logger, redisClient)
-	if err != nil {
-		logger.Printf("Ошибка при обработке новостей: %v", err)
-	}
+	processNews(redisClient)
 
-	ticker := time.NewTicker(2 * time.Minute)
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		go func() {
-			err := processNews(logger, redisClient)
-			if err != nil {
-				logger.Printf("Ошибка при обработке новостей: %v", err)
-			}
+			processNews(redisClient)
 		}()
 	}
 }
@@ -84,20 +71,21 @@ func setupRedisClient() *redis.Client {
 }
 
 // processNews обрабатывает новости: получает данные RSS, сохраняет их в Redis и отправляет подписчикам.
-// Принимает логгер logger и клиент Redis redisClient в качестве аргументов.
-// Возвращает ошибку, если произошла ошибка в процессе обработки новостей.
-func processNews(logger *log.Logger, redisClient *redis.Client) error {
+// Принимает клиент Redis redisClient в качестве аргумента.
+func processNews(redisClient *redis.Client) {
 	ctx := context.Background()
 
 	rssData, err := fetchRSS()
 	if err != nil {
-		return fmt.Errorf("ошибка при получении данных RSS: %v", err)
+		log.Printf("Ошибка при получении данных RSS: %v", err)
+		return
 	}
 
 	rss := RSS{}
 	err = xml.Unmarshal([]byte(rssData), &rss)
 	if err != nil {
-		return fmt.Errorf("ошибка при разборе данных RSS: %v", err)
+		log.Printf("Ошибка при разборе данных RSS: %v", err)
+		return
 	}
 
 	var wg sync.WaitGroup
@@ -109,9 +97,9 @@ func processNews(logger *log.Logger, redisClient *redis.Client) error {
 		go func(item Item) {
 			defer wg.Done()
 
-			exists, err := redisClient.SIsMember(ctx, "news", item.Description).Result()
+			exists, err := redisClient.SIsMember(ctx, "news", item.Title+item.Description).Result()
 			if err != nil {
-				logger.Printf("Ошибка Redis SIsMember: %v", err)
+				log.Printf("Ошибка Redis SIsMember: %v", err)
 				return
 			}
 
@@ -119,11 +107,11 @@ func processNews(logger *log.Logger, redisClient *redis.Client) error {
 				mu.Lock()
 				err := saveNewsToRedis(ctx, redisClient, item)
 				if err != nil {
-					logger.Printf("Ошибка при сохранении описания новости в Redis: %v", err)
+					log.Printf("Ошибка при сохранении новости в Redis: %v", err)
 				} else {
-					err = sendNewsToSubscribers(logger, redisClient, item)
+					err = sendNewsToSubscribers(redisClient, item)
 					if err != nil {
-						logger.Printf("Ошибка при отправке новости подписчикам: %v", err)
+						log.Printf("Ошибка при отправке новости подписчикам: %v", err)
 					}
 
 					newsCount++
@@ -136,10 +124,8 @@ func processNews(logger *log.Logger, redisClient *redis.Client) error {
 	wg.Wait()
 
 	if newsCount > 0 {
-		logger.Printf("Добавлено новостей: %d", newsCount)
+		log.Printf("Добавлено новостей: %d", newsCount)
 	}
-
-	return nil
 }
 
 func fetchRSS() (string, error) {
@@ -158,13 +144,15 @@ func fetchRSS() (string, error) {
 }
 
 func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item) error {
-	err := redisClient.SAdd(ctx, "news", item.Description).Err()
+	newsText := item.Title + ". " + item.Description
+
+	err := redisClient.SAdd(ctx, "news", newsText).Err()
 	if err != nil {
-		return fmt.Errorf("ошибка при сохранении описания новости в Redis: %v", err)
+		return fmt.Errorf("ошибка при сохранении новости в Redis: %v", err)
 	}
 
 	// Устанавливаем время жизни ключа на 48 часов (в секундах)
-	err = redisClient.Expire(ctx, item.Description, 48*time.Hour).Err()
+	err = redisClient.Expire(ctx, "news", 48*time.Hour).Err()
 	if err != nil {
 		return fmt.Errorf("ошибка при установке времени жизни ключа в Redis: %v", err)
 	}
@@ -172,7 +160,7 @@ func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item) 
 	return nil
 }
 
-func sendNewsToSubscribers(logger *log.Logger, redisClient *redis.Client, item Item) error {
+func sendNewsToSubscribers(redisClient *redis.Client, item Item) error {
 	ctx := context.Background()
 
 	subscribers, err := redisClient.SMembers(ctx, "subscribers").Result()
@@ -183,7 +171,7 @@ func sendNewsToSubscribers(logger *log.Logger, redisClient *redis.Client, item I
 	for _, subscriber := range subscribers {
 		err := sendMessageToSubscriber(subscriber, item)
 		if err != nil {
-			logger.Printf("Ошибка при отправке новости подписчику %s: %v", subscriber, err)
+			log.Printf("Ошибка при отправке новости подписчику %s: %v", subscriber, err)
 		}
 	}
 
