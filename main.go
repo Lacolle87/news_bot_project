@@ -97,6 +97,9 @@ func processNews(redisClient *redis.Client) {
 		go func(item Item) {
 			defer wg.Done()
 
+			mu.Lock()
+			defer mu.Unlock()
+
 			exists, err := redisClient.SIsMember(ctx, "news", item.Title+item.Description).Result()
 			if err != nil {
 				log.Printf("Ошибка Redis SIsMember: %v", err)
@@ -104,18 +107,9 @@ func processNews(redisClient *redis.Client) {
 			}
 
 			if !exists {
-				mu.Lock()
-				defer mu.Unlock()
-
 				err := saveNewsToRedis(ctx, redisClient, item)
 				if err != nil {
 					log.Printf("Ошибка при сохранении новости в Redis: %v", err)
-					return
-				}
-
-				err = sendNewsToSubscribers(redisClient, item)
-				if err != nil {
-					log.Printf("Ошибка при отправке новости подписчикам: %v", err)
 					return
 				}
 
@@ -157,32 +151,6 @@ func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item) 
 	if err != nil {
 		return fmt.Errorf("ошибка при установке времени жизни ключа в Redis: %v", err)
 	}
-
-	return nil
-}
-
-func sendNewsToSubscribers(redisClient *redis.Client, item Item) error {
-	ctx := context.Background()
-
-	subscribers, err := redisClient.SMembers(ctx, "subscribers").Result()
-	if err != nil {
-		return fmt.Errorf("ошибка при получении подписчиков из Redis: %v", err)
-	}
-
-	for _, subscriber := range subscribers {
-		err := sendMessageToSubscriber(subscriber, item)
-		if err != nil {
-			log.Printf("Ошибка при отправке новости подписчику %s: %v", subscriber, err)
-		}
-	}
-
-	return nil
-}
-
-func sendMessageToSubscriber(subscriber string, item Item) error {
-	// Отправляем сообщение с описанием новости подписчику
-	// Используйте вашу реализацию Telegram бота для отправки сообщений
-	// ...
 
 	return nil
 }
