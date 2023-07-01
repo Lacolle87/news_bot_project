@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"github.com/joho/godotenv"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -12,7 +13,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
-	"github.com/joho/godotenv"
+	"news_bot_project/logger" // Путь к вашему пакету logger
 )
 
 // Замените эти значения на свои
@@ -37,93 +38,108 @@ type Item struct {
 }
 
 func main() {
-	log.Println("Программа запущена. Новостной бот начинает работу.")
-
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Ошибка при загрузке файла .env")
+	loggerConfig := logger.LoggerConfig{
+		LogDir:     "logs",
+		MaxSize:    1,
+		MaxBackups: 5,
+		MaxAge:     30,
+		Compress:   false,
 	}
+
+	logger, err := logger.SetupLogger(loggerConfig)
+	if err != nil {
+		log.Fatal("Ошибка при инициализации логгера:", err)
+	}
+	defer logger.Close()
+
+	err = godotenv.Load()
+	if err != nil {
+		logger.Log(fmt.Sprintf("Ошибка при загрузке файла .env: %v", err))
+		logger.Close()
+		return
+	}
+
+	logger.Log(fmt.Sprintf("Программа запущена. Новостной бот начинает работу."))
 
 	redisHost = os.Getenv("REDIS_HOST")
 	redisPassword = os.Getenv("REDIS_PASSWORD")
 
-	redisClient := setupRedisClient()
+	redisClient := setupRedisClient(logger)
 	defer redisClient.Close()
 
-	processNews(redisClient)
+	processNews(redisClient, logger)
 
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		go func() {
-			processNews(redisClient)
+			processNews(redisClient, logger)
 		}()
 	}
 }
 
-func setupRedisClient() *redis.Client {
-	return redis.NewClient(&redis.Options{
-		Addr:     redisHost,
-		Password: redisPassword,
-		DB:       0,
+func setupRedisClient(logger *logger.Logger) *redis.Client {
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:            redisHost,
+		Password:        redisPassword,
+		DB:              0,
+		MaxRetries:      3,
+		MinRetryBackoff: 500 * time.Millisecond,
+		MaxRetryBackoff: 3 * time.Second,
+		OnConnect: func(ctx context.Context, cn *redis.Conn) error {
+			_, err := cn.Ping(ctx).Result()
+			return err
+		},
 	})
+
+	return redisClient
 }
 
-// processNews обрабатывает новости: получает данные RSS, сохраняет их в Redis и отправляет подписчикам.
-// Принимает клиент Redis redisClient в качестве аргумента.
-func processNews(redisClient *redis.Client) {
+func processNews(redisClient *redis.Client, logger *logger.Logger) {
 	ctx := context.Background()
 
-	rssData, err := fetchRSS()
+	rssData, err := fetchRSS(logger)
 	if err != nil {
-		log.Printf("Ошибка при получении данных RSS: %v", err)
+		logger.Log(fmt.Sprintf("Ошибка при получении данных RSS: %v", err))
 		return
 	}
 
 	rss := RSS{}
 	err = xml.Unmarshal([]byte(rssData), &rss)
 	if err != nil {
-		log.Printf("Ошибка при разборе данных RSS: %v", err)
+		logger.Log(fmt.Sprintf("Ошибка при разборе данных RSS: %v", err))
 		return
 	}
 
-	var wg sync.WaitGroup
 	var mu sync.Mutex
 	newsCount := 0
 
 	for _, item := range rss.Channel.Items {
-		wg.Add(1)
-		go func(item Item) {
-			defer wg.Done()
+		exists, err := redisClient.SIsMember(ctx, "news", item.Title+item.Description).Result()
+		if err != nil {
+			logger.Log(fmt.Sprintf("Ошибка Redis SIsMember: %v", err))
+			continue
+		}
 
+		if !exists {
 			mu.Lock()
-			defer mu.Unlock()
 
-			exists, err := redisClient.SIsMember(ctx, "news", item.Title+item.Description).Result()
+			err := saveNewsToRedis(ctx, redisClient, item, logger)
 			if err != nil {
-				log.Printf("Ошибка Redis SIsMember: %v", err)
-				return
-			}
-
-			if !exists {
-				err := saveNewsToRedis(ctx, redisClient, item)
-				if err != nil {
-					log.Printf("Ошибка при сохранении новости в Redis: %v", err)
-					return
-				}
-
+				logger.Log(fmt.Sprintf("Ошибка при сохранении новости в Redis: %v", err))
+			} else {
 				newsCount++
 			}
-		}(item)
+
+			mu.Unlock()
+		}
 	}
 
-	wg.Wait()
-
-	log.Printf("Добавлено новостей: %d", newsCount)
+	logger.Log(fmt.Sprintf("Добавлено новостей: %d", newsCount))
 }
 
-func fetchRSS() (string, error) {
+func fetchRSS(logger *logger.Logger) (string, error) {
 	resp, err := http.Get("https://news.mail.ru/rss/")
 	if err != nil {
 		return "", fmt.Errorf("ошибка при получении данных RSS: %v", err)
@@ -138,7 +154,7 @@ func fetchRSS() (string, error) {
 	return string(body), nil
 }
 
-func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item) error {
+func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item, logger *logger.Logger) error {
 	newsText := item.Title + ". " + item.Description
 
 	err := redisClient.SAdd(ctx, "news", newsText).Err()
