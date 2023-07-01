@@ -105,27 +105,28 @@ func processNews(redisClient *redis.Client) {
 
 			if !exists {
 				mu.Lock()
+				defer mu.Unlock()
+
 				err := saveNewsToRedis(ctx, redisClient, item)
 				if err != nil {
 					log.Printf("Ошибка при сохранении новости в Redis: %v", err)
-				} else {
-					err = sendNewsToSubscribers(redisClient, item)
-					if err != nil {
-						log.Printf("Ошибка при отправке новости подписчикам: %v", err)
-					}
-
-					newsCount++
+					return
 				}
-				mu.Unlock()
+
+				err = sendNewsToSubscribers(redisClient, item)
+				if err != nil {
+					log.Printf("Ошибка при отправке новости подписчикам: %v", err)
+					return
+				}
+
+				newsCount++
 			}
 		}(item)
 	}
 
 	wg.Wait()
 
-	if newsCount > 0 {
-		log.Printf("Добавлено новостей: %d", newsCount)
-	}
+	log.Printf("Добавлено новостей: %d", newsCount)
 }
 
 func fetchRSS() (string, error) {
