@@ -162,11 +162,5 @@ func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item, 
 		return fmt.Errorf("ошибка при сохранении новости в Redis: %v", err)
 	}
 
-	// Устанавливаем время жизни ключа на 48 часов (в секундах)
-	err = redisClient.Expire(ctx, "news", 48*time.Hour).Err()
-	if err != nil {
-		return fmt.Errorf("ошибка при установке времени жизни ключа в Redis: %v", err)
-	}
-
 	return nil
 }
