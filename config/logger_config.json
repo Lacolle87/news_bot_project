@@ -1,0 +1,7 @@
+{
+  "LogDir": "logs",
+  "MaxSize": 1,
+  "MaxBackups": 5,
+  "MaxAge": 30,
+  "Compress": false
+}

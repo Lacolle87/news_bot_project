@@ -37,12 +37,11 @@ type Item struct {
 }
 
 func main() {
-	loggerConfig := logger.LoggerConfig{
-		LogDir:     "logs",
-		MaxSize:    1,
-		MaxBackups: 5,
-		MaxAge:     30,
-		Compress:   false,
+	configFile := "config/logger_config.json"
+
+	loggerConfig, err := logger.LoadLoggerConfig(configFile)
+	if err != nil {
+		log.Fatal("Ошибка при загрузке конфигурации логгера:", err)
 	}
 
 	logger, err := logger.SetupLogger(loggerConfig)

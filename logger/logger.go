@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -13,11 +14,11 @@ import (
 
 // LoggerConfig содержит параметры для настройки логгера.
 type LoggerConfig struct {
-	LogDir     string // Директория для хранения логов
-	MaxSize    int    // Максимальный размер файла лога в мегабайтах
-	MaxBackups int    // Максимальное количество старых файлов лога, которые нужно сохранить
-	MaxAge     int    // Максимальное количество дней, в течение которых нужно хранить старые файлы лога
-	Compress   bool   // Сжимать старые файлы лога
+	LogDir     string `json:"logDir"`     // Директория для хранения логов
+	MaxSize    int    `json:"maxSize"`    // Максимальный размер файла лога в мегабайтах
+	MaxBackups int    `json:"maxBackups"` // Максимальное количество старых файлов лога, которые нужно сохранить
+	MaxAge     int    `json:"maxAge"`     // Максимальное количество дней, в течение которых нужно хранить старые файлы лога
+	Compress   bool   `json:"compress"`   // Сжимать старые файлы лога
 }
 
 // Logger представляет логгер для записи в файл с ротацией логов.
@@ -68,4 +69,21 @@ func (l *Logger) Close() error {
 func getLogFileName() string {
 	currentTime := time.Now().In(time.FixedZone("MSK", 3*60*60)) // Установка часового пояса на Москву (UTC+3)
 	return fmt.Sprintf("log_%02d%02d%04d.txt", currentTime.Day(), currentTime.Month(), currentTime.Year())
+}
+
+// LoadLoggerConfig загружает конфигурацию логгера из JSON-файла.
+func LoadLoggerConfig(configPath string) (LoggerConfig, error) {
+	file, err := os.Open(configPath)
+	if err != nil {
+		return LoggerConfig{}, err
+	}
+	defer file.Close()
+
+	var config LoggerConfig
+	err = json.NewDecoder(file).Decode(&config)
+	if err != nil {
+		return LoggerConfig{}, err
+	}
+
+	return config, nil
 }
