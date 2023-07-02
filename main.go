@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
-	"github.com/joho/godotenv"
 	"io"
 	"log"
 	"net/http"
@@ -12,6 +11,8 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/joho/godotenv"
+	"news_bot_project/bot"
 	"news_bot_project/logger"
 )
 
@@ -61,6 +62,7 @@ func main() {
 
 	redisHost = os.Getenv("REDIS_HOST")
 	redisPassword = os.Getenv("REDIS_PASSWORD")
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 
 	redisClient := setupRedisClient()
 	defer redisClient.Close()
@@ -75,6 +77,22 @@ func main() {
 			processNews(redisClient, logger)
 		}()
 	}
+
+	err = bot.TakeSnapshotIfNeeded(redisClient, logger)
+	if err != nil {
+		logger.Log("Ошибка при создании снимка идентификаторов чатов: " + err.Error())
+	}
+
+	go func() {
+		err := bot.StartBot(redisClient, botToken, logger)
+		if err != nil {
+			logger.Log("Ошибка при запуске бота: " + err.Error())
+			logger.Close()
+			return
+		}
+	}()
+
+	select {}
 }
 
 func setupRedisClient() *redis.Client {
