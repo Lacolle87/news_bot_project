@@ -178,5 +178,12 @@ func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item, 
 		return err
 	}
 
+	expiration := 48 * time.Hour
+	err = redisClient.Expire(ctx, "news", expiration).Err()
+	if err != nil {
+		logger.Log("Ошибка при установке срока годности для новости в Redis: " + err.Error())
+		return err
+	}
+
 	return nil
 }
