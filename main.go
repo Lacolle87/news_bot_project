@@ -5,11 +5,10 @@ import (
 	"encoding/xml"
 	"fmt"
 	"github.com/joho/godotenv"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -54,17 +53,17 @@ func main() {
 
 	err = godotenv.Load()
 	if err != nil {
-		logger.Log(fmt.Sprintf("Ошибка при загрузке файла .env: %v", err))
+		logger.Log("Ошибка при загрузке файла .env: " + err.Error())
 		logger.Close()
 		return
 	}
 
-	logger.Log(fmt.Sprintf("Программа запущена. Новостной бот начинает работу."))
+	logger.Log("Программа запущена. Новостной бот начинает работу.")
 
 	redisHost = os.Getenv("REDIS_HOST")
 	redisPassword = os.Getenv("REDIS_PASSWORD")
 
-	redisClient := setupRedisClient(logger)
+	redisClient := setupRedisClient()
 	defer redisClient.Close()
 
 	processNews(redisClient, logger)
@@ -79,7 +78,7 @@ func main() {
 	}
 }
 
-func setupRedisClient(logger *logger.Logger) *redis.Client {
+func setupRedisClient() *redis.Client {
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:            redisHost,
 		Password:        redisPassword,
@@ -96,59 +95,76 @@ func setupRedisClient(logger *logger.Logger) *redis.Client {
 	return redisClient
 }
 
+// processNews обрабатывает новостные данные из RSS-ленты и сохраняет их в Redis.
 func processNews(redisClient *redis.Client, logger *logger.Logger) {
 	ctx := context.Background()
 
+	// Получаем данные RSS
 	rssData, err := fetchRSS(logger)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Ошибка при получении данных RSS: %v", err))
+		logger.Log("Ошибка при получении данных RSS: " + err.Error())
 		return
 	}
 
+	// Разбираем данные RSS
 	rss := RSS{}
 	err = xml.Unmarshal([]byte(rssData), &rss)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Ошибка при разборе данных RSS: %v", err))
+		logger.Log("Ошибка при разборе данных RSS: " + err.Error())
 		return
 	}
 
-	var mu sync.Mutex
-	newsCount := 0
+	// Получаем начальное количество новостей из Redis
+	initialCount, err := redisClient.SCard(ctx, "news").Result()
+	if err != nil {
+		logger.Log("Ошибка при получении количества новостей из Redis: " + err.Error())
+		return
+	}
 
+	// Обрабатываем каждый элемент в RSS-ленте
 	for _, item := range rss.Channel.Items {
+		// Проверяем, существует ли новость уже в Redis
 		exists, err := redisClient.SIsMember(ctx, "news", item.Title+item.Description).Result()
 		if err != nil {
-			logger.Log(fmt.Sprintf("Ошибка Redis SIsMember: %v", err))
+			logger.Log("Ошибка Redis SIsMember: " + err.Error())
 			continue
 		}
 
+		// Если новость не существует в Redis, сохраняем её
 		if !exists {
-			mu.Lock()
-
 			err := saveNewsToRedis(ctx, redisClient, item, logger)
 			if err != nil {
-				logger.Log(fmt.Sprintf("Ошибка при сохранении новости в Redis: %v", err))
-			} else {
-				newsCount++
+				logger.Log("Ошибка при сохранении новости в Redis: " + err.Error())
 			}
-
-			mu.Unlock()
 		}
 	}
 
-	logger.Log(fmt.Sprintf("Добавлено новостей: %d", newsCount))
+	// Получаем обновленное количество новостей после добавления
+	updatedCount, err := redisClient.SCard(ctx, "news").Result()
+	if err != nil {
+		logger.Log("Ошибка при получении общего количества новостей из Redis: " + err.Error())
+		return
+	}
+
+	// Рассчитываем количество добавленных новостей
+	addedCount := updatedCount - initialCount
+	if addedCount > 0 {
+		logger.Log(fmt.Sprintf("Добавлено новостей: %d", addedCount))
+	}
 }
 
 func fetchRSS(logger *logger.Logger) (string, error) {
 	resp, err := http.Get("https://news.mail.ru/rss/")
 	if err != nil {
-		return "", fmt.Errorf("ошибка при получении данных RSS: %v", err)
+		logger.Log("Ошибка при получении данных RSS: " + err.Error())
+		return "", err
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("ошибка при чтении тела ответа RSS: %v", err)
+		logger.Log("Ошибка при чтении тела ответа RSS: " + err.Error())
+		return "", err
 	}
 
 	return string(body), nil
@@ -159,7 +175,8 @@ func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item, 
 
 	err := redisClient.SAdd(ctx, "news", newsText).Err()
 	if err != nil {
-		return fmt.Errorf("ошибка при сохранении новости в Redis: %v", err)
+		logger.Log("Ошибка при сохранении новости в Redis: " + err.Error())
+		return err
 	}
 
 	return nil
