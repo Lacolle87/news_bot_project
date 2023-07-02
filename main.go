@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
-	"news_bot_project/logger" // Путь к вашему пакету logger
+	"news_bot_project/logger"
 )
 
 // Замените эти значения на свои
@@ -113,17 +113,13 @@ func processNews(redisClient *redis.Client, logger *logger.Logger) {
 		return
 	}
 
-	// Получаем начальное количество новостей из Redis
-	initialCount, err := redisClient.SCard(ctx, "news").Result()
-	if err != nil {
-		logger.Log("Ошибка при получении количества новостей из Redis: " + err.Error())
-		return
-	}
+	// Инициализируем счетчик добавленных новостей
+	addedCount := 0
 
 	// Обрабатываем каждый элемент в RSS-ленте
 	for _, item := range rss.Channel.Items {
 		// Проверяем, существует ли новость уже в Redis
-		exists, err := redisClient.SIsMember(ctx, "news", item.Title+item.Description).Result()
+		exists, err := redisClient.SIsMember(ctx, "news", item.Title+". "+item.Description).Result()
 		if err != nil {
 			logger.Log("Ошибка Redis SIsMember: " + err.Error())
 			continue
@@ -134,19 +130,13 @@ func processNews(redisClient *redis.Client, logger *logger.Logger) {
 			err := saveNewsToRedis(ctx, redisClient, item, logger)
 			if err != nil {
 				logger.Log("Ошибка при сохранении новости в Redis: " + err.Error())
+				continue
 			}
+			addedCount++ // Увеличиваем счетчик добавленных новостей
 		}
 	}
 
-	// Получаем обновленное количество новостей после добавления
-	updatedCount, err := redisClient.SCard(ctx, "news").Result()
-	if err != nil {
-		logger.Log("Ошибка при получении общего количества новостей из Redis: " + err.Error())
-		return
-	}
-
-	// Рассчитываем количество добавленных новостей
-	addedCount := updatedCount - initialCount
+	// Выводим количество добавленных новостей
 	if addedCount > 0 {
 		logger.Log(fmt.Sprintf("Добавлено новостей: %d", addedCount))
 	}

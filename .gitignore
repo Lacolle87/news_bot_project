@@ -1,2 +1,5 @@
 /logs/
 /.env
+/.idea/modules.xml
+/.idea/news_bot_project.iml
+/.idea/vcs.xml
