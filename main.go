@@ -69,14 +69,14 @@ func main() {
 
 	processNews(redisClient, logger)
 
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
 
-	for range ticker.C {
-		go func() {
+		for range ticker.C {
 			processNews(redisClient, logger)
-		}()
-	}
+		}
+	}()
 
 	err = bot.TakeSnapshotIfNeeded(redisClient, logger)
 	if err != nil {

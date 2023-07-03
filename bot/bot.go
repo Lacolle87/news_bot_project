@@ -17,7 +17,7 @@ func StartBot(redis *redis.Client, botToken string, logger *logger.Logger) error
 		return err
 	}
 
-	bot.Debug = true
+	bot.Debug = false
 	logger.Log("Бот запущен.")
 
 	u := tgbotapi.NewUpdate(0)
