@@ -173,7 +173,17 @@ func fetchRSS(logger *logger.Logger) (string, error) {
 }
 
 func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item, logger *logger.Logger) error {
-	newsText := item.Title + ". " + item.Description
+	newsText := item.Title
+	if len(newsText) > 0 {
+		lastChar := newsText[len(newsText)-1]
+		if lastChar == '.' || lastChar == '!' || lastChar == '?' {
+			newsText += " "
+		} else {
+			newsText += ". "
+		}
+	}
+
+	newsText += item.Description
 
 	err := redisClient.SAdd(ctx, "news", newsText).Err()
 	if err != nil {
