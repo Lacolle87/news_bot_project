@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -132,7 +133,12 @@ func processNews(redisClient *redis.Client, logger *logger.Logger) {
 	// Обрабатываем каждый элемент в RSS-ленте
 	for _, item := range rss.Channel.Items {
 		// Проверяем, существует ли новость уже в Redis
-		exists, err := redisClient.SIsMember(ctx, "news", item.Title+". "+item.Description).Result()
+		newsKey := item.Title + ". " + item.Description
+		if strings.HasSuffix(item.Title, ".") || strings.HasSuffix(item.Title, "!") || strings.HasSuffix(item.Title, "?") {
+			newsKey = item.Title + " " + item.Description
+		}
+
+		exists, err := redisClient.SIsMember(ctx, "news", newsKey).Result()
 		if err != nil {
 			logger.Log("Ошибка Redis SIsMember: " + err.Error())
 			continue
@@ -197,6 +203,8 @@ func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item, 
 		logger.Log("Ошибка при установке срока годности для новости в Redis: " + err.Error())
 		return err
 	}
+
+	logger.Log("Новость добавлена в Redis: " + newsText)
 
 	return nil
 }

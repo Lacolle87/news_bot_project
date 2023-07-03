@@ -171,7 +171,6 @@ func createChatIDSnapshot(redis *redis.Client, logger *logger.Logger) error {
 }
 
 // sendRandomNews отправляет каждому зарегистрированному chatID свою случайную новость.
-// sendRandomNews отправляет случайную новость всем зарегистрированным чатам.
 func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Logger) {
 	ctx := context.Background()
 
