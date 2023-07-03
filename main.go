@@ -78,11 +78,6 @@ func main() {
 		}
 	}()
 
-	err = bot.TakeSnapshotIfNeeded(redisClient, logger)
-	if err != nil {
-		logger.Log("Ошибка при создании снимка идентификаторов чатов: " + err.Error())
-	}
-
 	go func() {
 		err := bot.StartBot(redisClient, botToken, logger)
 		if err != nil {
