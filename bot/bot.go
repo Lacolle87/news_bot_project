@@ -96,17 +96,44 @@ func handleStart(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis.C
 		return
 	}
 
-	// Создание снимка идентификаторов чатов, если снимок не был создан ранее
-	err = createChatIDSnapshot(redis, logger)
-	if err != nil {
-		logger.Log("Ошибка при создании снимка идентификаторов чатов: " + err.Error())
-	}
-
 	reply := "Добро пожаловать! Вы успешно подписались на новостного бота."
 	msg := tgbotapi.NewMessage(chatID, reply)
 	_, err = bot.Send(msg)
 	if err != nil {
 		logger.Log("Ошибка при отправке ответа на команду: " + err.Error())
+		return
+	}
+
+	// Задержка 5 секунд
+	time.Sleep(5 * time.Second)
+
+	// Получаем одну новость из Redis
+	ctx := context.Background()
+	news, err := redis.SRandMember(ctx, "news").Result()
+	if err != nil {
+		logger.Log("Ошибка при получении новости из Redis: " + err.Error())
+		return
+	}
+
+	// Отправляем новость пользователю
+	msg = tgbotapi.NewMessage(chatID, news)
+	_, err = bot.Send(msg)
+	if err != nil {
+		logger.Log("Ошибка при отправке новости: " + err.Error())
+		return
+	}
+
+	// Создаем первую запись новостей для данного chatID
+	err = redis.SAdd(ctx, fmt.Sprintf("sent_news:%d", chatID), news).Err()
+	if err != nil {
+		logger.Log("Ошибка при создании записи новостей: " + err.Error())
+		return
+	}
+
+	// Создание снимка идентификаторов чатов, если снимок не был создан ранее
+	err = createChatIDSnapshot(redis, logger)
+	if err != nil {
+		logger.Log("Ошибка при создании снимка идентификаторов чатов: " + err.Error())
 	}
 }
 
@@ -143,6 +170,7 @@ func createChatIDSnapshot(redis *redis.Client, logger *logger.Logger) error {
 	return nil
 }
 
+// sendRandomNews отправляет каждому зарегистрированному chatID свою случайную новость.
 // sendRandomNews отправляет случайную новость всем зарегистрированным чатам.
 func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Logger) {
 	ctx := context.Background()
