@@ -124,7 +124,7 @@ func handleStart(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis.C
 	}
 
 	// Создаем первую запись новостей для данного chatID
-	err = redis.SAdd(ctx, fmt.Sprintf("sent_news:%d", chatID), news).Err()
+	err = saveSentNews(ctx, redis, chatID, news, logger)
 	if err != nil {
 		logger.Log("Ошибка при создании записи новостей: " + err.Error())
 		return
@@ -178,34 +178,33 @@ func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Lo
 	// Получаем все зарегистрированные chatID из Redis
 	chatIDs, err := redis.SMembers(ctx, "chat_ids").Result()
 	if err != nil {
-		logger.Log("Ошибка при получении зарегистрированных chatID из Redis: " + err.Error())
+		logger.Log("Ошибка при получении идентификаторов чатов из Redis: " + err.Error())
 		return
 	}
 
-	// Получаем случайную новость из Redis
+	// Получаем одну новость из Redis
 	news, err := redis.SRandMember(ctx, "news").Result()
 	if err != nil {
-		logger.Log("Ошибка при получении случайной новости из Redis: " + err.Error())
+		logger.Log("Ошибка при получении новости из Redis: " + err.Error())
 		return
 	}
 
-	// Отправляем новость каждому зарегистрированному chatID
 	for _, chatIDStr := range chatIDs {
 		chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
 		if err != nil {
-			logger.Log("Ошибка при преобразовании chatID из строки в число: " + err.Error())
+			logger.Log("Ошибка при парсинге идентификатора чата: " + err.Error())
 			continue
 		}
 
-		// Проверяем, была ли уже отправлена эта новость для данного chatID
-		exists, err := redis.SIsMember(ctx, fmt.Sprintf("sent_news:%s", chatIDStr), news).Result()
+		// Проверяем, была ли уже отправлена данная новость этому chatID
+		sent, err := redis.SIsMember(ctx, fmt.Sprintf("sent:%d", chatID), news).Result()
 		if err != nil {
-			logger.Log("Ошибка при проверке отправки новости для chatID: " + err.Error())
+			logger.Log("Ошибка при проверке отправленной новости: " + err.Error())
 			continue
 		}
 
-		if exists {
-			// Новость уже отправлена, пропускаем отправку
+		if sent {
+			// Если новость уже отправлена, пропускаем отправку
 			continue
 		}
 
@@ -217,13 +216,24 @@ func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Lo
 			continue
 		}
 
-		// Записываем информацию о отправленной новости для данного chatID
-		err = redis.SAdd(ctx, fmt.Sprintf("sent_news:%s", chatIDStr), news).Err()
+		// Создаем запись новости для данного chatID
+		err = saveSentNews(ctx, redis, chatID, news, logger)
 		if err != nil {
-			logger.Log("Ошибка при записи информации о отправленной новости: " + err.Error())
+			logger.Log("Ошибка при создании записи новостей: " + err.Error())
 			continue
 		}
 	}
 
-	logger.Log("Отправка новостей завершена.")
+	logger.Log("Отправлены новости всем зарегистрированным чатам.")
+}
+
+// saveSentNews сохраняет отправленную новость для данного chatID в Redis.
+func saveSentNews(ctx context.Context, redis *redis.Client, chatID int64, news string, logger *logger.Logger) error {
+	_, err := redis.SAdd(ctx, fmt.Sprintf("sent:%d", chatID), news).Result()
+	if err != nil {
+		logger.Log("Ошибка при сохранении отправленной новости: " + err.Error())
+		return err
+	}
+
+	return nil
 }
