@@ -204,7 +204,7 @@ func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item, 
 		return err
 	}
 
-	logger.Log("Новость добавлена в Redis: " + newsText)
+	//logger.Log("Новость добавлена в Redis: " + newsText)
 
 	return nil
 }

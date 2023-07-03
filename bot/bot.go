@@ -170,32 +170,38 @@ func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Lo
 	logger.Log("Отправлены новости всем зарегистрированным чатам.")
 }
 
-// saveSentNews сохраняет отправленную новость в Redis.
+// saveSentNews сохраняет отправленную новость в Redis с TTL 48 часов.
 func saveSentNews(ctx context.Context, redis *redis.Client, chatID int64, news string, logger *logger.Logger) error {
-	_, err := redis.RPush(ctx, fmt.Sprintf("sent_news:%d", chatID), news).Result()
+	key := fmt.Sprintf("sent_news:%d", chatID)
+	duration := 48 * time.Hour
+
+	_, err := redis.SAdd(ctx, key, news).Result()
 	if err != nil {
 		logger.Log("Ошибка при сохранении отправленной новости в Redis: " + err.Error())
+		return err
+	}
+
+	// Устанавливаем время жизни ключа
+	_, err = redis.Expire(ctx, key, duration).Result()
+	if err != nil {
+		logger.Log("Ошибка при установке TTL для ключа в Redis: " + err.Error())
 		return err
 	}
 
 	return nil
 }
 
-// createChatIDSnapshot создает снимок идентификаторов чатов в Redis, если снимок еще не создан.
+// createChatIDSnapshot создает снимок идентификаторов чатов, используя команду BGSAVE Redis.
 func createChatIDSnapshot(redis *redis.Client, logger *logger.Logger) error {
-	exists, err := redis.Exists(context.Background(), "chat_ids_snapshot").Result()
+	ctx := context.Background()
+
+	// Запускаем фоновое сохранение набора данных
+	err := redis.BgSave(ctx).Err()
 	if err != nil {
-		logger.Log("Ошибка при проверке существования снимка идентификаторов чатов: " + err.Error())
 		return err
 	}
 
-	if exists == 0 {
-		_, err = redis.SUnionStore(context.Background(), "chat_ids_snapshot", "chat_ids").Result()
-		if err != nil {
-			logger.Log("Ошибка при создании снимка идентификаторов чатов: " + err.Error())
-			return err
-		}
-	}
+	logger.Log("Создан снимок идентификаторов чатов.")
 
 	return nil
 }
