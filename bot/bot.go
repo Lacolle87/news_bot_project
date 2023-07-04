@@ -60,12 +60,12 @@ func handleCommand(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis
 		handleGetNews(message.Chat.ID, bot, redis, logger)
 	default:
 		reply := "Неизвестная команда. Доступные команды: /start, /getnews"
-		sendMessage(message.Chat.ID, reply, bot, redis, logger)
+		sendMessage(message.Chat.ID, reply, bot, redis, logger, false)
 	}
 }
 
 // sendMessage отправляет сообщение указанному chatID.
-func sendMessage(chatID int64, message string, bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Logger) {
+func sendMessage(chatID int64, message string, bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Logger, save bool) {
 	msg := tgbotapi.NewMessage(chatID, message)
 	_, err := bot.Send(msg)
 	if err != nil {
@@ -73,9 +73,11 @@ func sendMessage(chatID int64, message string, bot *tgbotapi.BotAPI, redis *redi
 		return
 	}
 
-	err = saveSentNews(context.Background(), redis, chatID, message, logger)
-	if err != nil {
-		logger.Log("Ошибка при сохранении отправленного сообщения: " + err.Error())
+	if save {
+		err = saveSentNews(context.Background(), redis, chatID, message, logger)
+		if err != nil {
+			logger.Log("Ошибка при сохранении отправленного сообщения: " + err.Error())
+		}
 	}
 }
 
@@ -92,7 +94,7 @@ func handleStart(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis.C
 
 	if exists {
 		reply := "Вы уже подписаны на новостного бота."
-		sendMessage(chatID, reply, bot, redis, logger)
+		sendMessage(chatID, reply, bot, redis, logger, false)
 		return
 	}
 
@@ -104,7 +106,7 @@ func handleStart(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis.C
 	}
 
 	reply := "Добро пожаловать! Вы успешно подписались на новостного бота."
-	sendMessage(chatID, reply, bot, redis, logger)
+	sendMessage(chatID, reply, bot, redis, logger, false)
 
 	sendInitialNews(chatID, bot, redis, logger)
 }
@@ -123,7 +125,7 @@ func sendInitialNews(chatID int64, bot *tgbotapi.BotAPI, redis *redis.Client, lo
 	}
 
 	// Отправляем новость пользователю
-	sendMessage(chatID, news, bot, redis, logger)
+	sendMessage(chatID, news, bot, redis, logger, true)
 
 	// Создание снимка идентификаторов чатов, если снимок не был создан ранее
 	err = createChatIDSnapshot(redis, logger)
@@ -142,11 +144,11 @@ func handleGetNews(chatID int64, bot *tgbotapi.BotAPI, redis *redis.Client, logg
 
 	if news == "" {
 		reply := "Извините, пока нет доступных новостей."
-		sendMessage(chatID, reply, bot, redis, logger)
+		sendMessage(chatID, reply, bot, redis, logger, false)
 		return
 	}
 
-	sendMessage(chatID, news, bot, redis, logger)
+	sendMessage(chatID, news, bot, redis, logger, true)
 }
 
 // sendRandomNews отправляет случайную новость каждому подписанному пользователю.
@@ -165,7 +167,7 @@ func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Lo
 
 	for _, chatIDStr := range chatIDs {
 		chatID, _ := strconv.ParseInt(chatIDStr, 10, 64)
-		sendMessage(chatID, news, bot, redis, logger)
+		sendMessage(chatID, news, bot, redis, logger, true)
 	}
 	logger.Log("Отправлены новости всем зарегистрированным чатам.")
 }
