@@ -19,6 +19,7 @@ type LoggerConfig struct {
 	MaxBackups int    `json:"maxBackups"` // Максимальное количество старых файлов лога, которые нужно сохранить
 	MaxAge     int    `json:"maxAge"`     // Максимальное количество дней, в течение которых нужно хранить старые файлы лога
 	Compress   bool   `json:"compress"`   // Сжимать старые файлы лога
+	Timezone   string `json:"timezone"`   // Часовой пояс
 }
 
 // Logger представляет логгер для записи в файл с ротацией логов.
@@ -35,7 +36,7 @@ func SetupLogger(config LoggerConfig) (*Logger, error) {
 		return nil, err
 	}
 
-	logPath := filepath.Join(config.LogDir, getLogFileName())
+	logPath := filepath.Join(config.LogDir, getLogFileName(config.Timezone))
 	file := &lumberjack.Logger{
 		Filename:   logPath,
 		MaxSize:    config.MaxSize,
@@ -66,9 +67,20 @@ func (l *Logger) Close() error {
 }
 
 // getLogFileName возвращает имя файла лога с текущей датой и временем в формате "log_DDMMYYYY.txt".
-func getLogFileName() string {
-	currentTime := time.Now().In(time.FixedZone("MSK", 3*60*60)) // Установка часового пояса на Москву (UTC+3)
+func getLogFileName(timezone string) string {
+	currentTime := time.Now().In(getTimezone(timezone))
 	return fmt.Sprintf("log_%02d%02d%04d.txt", currentTime.Day(), currentTime.Month(), currentTime.Year())
+}
+
+// getTimezone возвращает объект типа *time.Location для указанного часового пояса.
+// Если часовой пояс недопустим, будет использован часовой пояс UTC.
+func getTimezone(timezone string) *time.Location {
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		// Использование часового пояса UTC, если указанный часовой пояс недопустим
+		loc = time.UTC
+	}
+	return loc
 }
 
 // LoadLoggerConfig загружает конфигурацию логгера из JSON-файла.
