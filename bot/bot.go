@@ -24,7 +24,7 @@ func StartBot(redis *redis.Client, botToken string, logger *logger.Logger) error
 
 	go func() {
 		for {
-			sendRandomNews(bot, redis, logger)
+			sendRandomNews(bot, redis, logger, false)
 			time.Sleep(1 * time.Minute)
 		}
 	}()
@@ -81,11 +81,9 @@ func sendMessage(chatID int64, message string, bot *tgbotapi.BotAPI, redis *redi
 	}
 }
 
-// handleStart обрабатывает команду /start.
 func handleStart(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Logger) {
 	chatID := message.Chat.ID
 
-	// Проверяем, существует ли идентификатор чата уже в Redis
 	exists, err := redis.SIsMember(context.Background(), "chat_ids", strconv.FormatInt(chatID, 10)).Result()
 	if err != nil {
 		logger.Log("Ошибка при проверке идентификатора чата в Redis: " + err.Error())
@@ -98,7 +96,6 @@ func handleStart(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis.C
 		return
 	}
 
-	// Заносим идентификатор чата в Redis
 	_, err = redis.SAdd(context.Background(), "chat_ids", strconv.FormatInt(chatID, 10)).Result()
 	if err != nil {
 		logger.Log("Ошибка при сохранении идентификатора чата в Redis: " + err.Error())
@@ -108,30 +105,7 @@ func handleStart(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis.C
 	reply := "Добро пожаловать! Вы успешно подписались на новостного бота."
 	sendMessage(chatID, reply, bot, redis, logger, false)
 
-	sendInitialNews(chatID, bot, redis, logger)
-}
-
-// sendInitialNews отправляет пользователю одну случайную новость при подписке.
-func sendInitialNews(chatID int64, bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Logger) {
-	// Задержка 5 секунд
-	time.Sleep(5 * time.Second)
-
-	// Получаем одну новость из Redis
-	ctx := context.Background()
-	news, err := redis.SRandMember(ctx, "news").Result()
-	if err != nil {
-		logger.Log("Ошибка при получении новости из Redis: " + err.Error())
-		return
-	}
-
-	// Отправляем новость пользователю
-	sendMessage(chatID, news, bot, redis, logger, true)
-
-	// Создание снимка идентификаторов чатов, если снимок не был создан ранее
-	err = createChatIDSnapshot(redis, logger)
-	if err != nil {
-		logger.Log("Ошибка при создании снимка идентификаторов чатов: " + err.Error())
-	}
+	sendRandomNews(bot, redis, logger, true)
 }
 
 // handleGetNews обрабатывает команду /getnews.
@@ -151,17 +125,18 @@ func handleGetNews(chatID int64, bot *tgbotapi.BotAPI, redis *redis.Client, logg
 	sendMessage(chatID, news, bot, redis, logger, true)
 }
 
-// sendRandomNews отправляет случайную новость каждому подписанному пользователю.
-func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Logger) {
-	chatIDs, err := redis.SMembers(context.Background(), "chat_ids").Result()
+func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Logger, initial bool) {
+	// Получаем одну новость из Redis
+	ctx := context.Background()
+	news, err := redis.SRandMember(ctx, "news").Result()
 	if err != nil {
-		logger.Log("Ошибка при получении идентификаторов чатов из Redis: " + err.Error())
+		logger.Log("Ошибка при получении новости из Redis: " + err.Error())
 		return
 	}
 
-	news, err := redis.SRandMember(context.Background(), "news").Result()
+	chatIDs, err := redis.SMembers(ctx, "chat_ids").Result()
 	if err != nil {
-		logger.Log("Ошибка при получении новости из Redis: " + err.Error())
+		logger.Log("Ошибка при получении идентификаторов чатов из Redis: " + err.Error())
 		return
 	}
 
@@ -169,7 +144,12 @@ func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Lo
 		chatID, _ := strconv.ParseInt(chatIDStr, 10, 64)
 		sendMessage(chatID, news, bot, redis, logger, true)
 	}
-	logger.Log("Отправлены новости всем зарегистрированным чатам.")
+
+	if initial {
+		logger.Log("Отправлена новость при подписке на бота.")
+	} else {
+		logger.Log("Отправлены новости всем зарегистрированным чатам.")
+	}
 }
 
 // saveSentNews сохраняет отправленную новость в Redis с TTL 48 часов.
