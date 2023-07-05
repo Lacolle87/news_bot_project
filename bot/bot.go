@@ -102,8 +102,15 @@ func handleStart(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis.C
 		return
 	}
 
+	err = createChatIDSnapshot(redis, logger) // Вызов функции createChatIDSnapshot
+	if err != nil {
+		logger.Log("Ошибка при создании снимка идентификаторов чатов: " + err.Error())
+	}
+
 	reply := "Добро пожаловать! Вы успешно подписались на новостного бота."
 	sendMessage(chatID, reply, bot, redis, logger, false)
+
+	time.Sleep(5 * time.Second)
 
 	sendRandomNews(bot, redis, logger, true)
 }
@@ -113,10 +120,6 @@ func handleGetNews(chatID int64, bot *tgbotapi.BotAPI, redis *redis.Client, logg
 	news, err := redis.SRandMember(context.Background(), "news").Result()
 	if err != nil {
 		logger.Log("Ошибка при получении новости из Redis: " + err.Error())
-		return
-	}
-
-	if news == "" {
 		reply := "Извините, пока нет доступных новостей."
 		sendMessage(chatID, reply, bot, redis, logger, false)
 		return
