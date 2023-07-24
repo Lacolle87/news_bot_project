@@ -26,7 +26,7 @@ func StartBot(redis *redis.Client, botToken string, logger *logger.Logger) error
 	go func() {
 		for {
 			sendRandomNews(bot, redis, logger, false)
-			time.Sleep(1 * time.Minute)
+			time.Sleep(10 * time.Minute)
 		}
 	}()
 
@@ -211,7 +211,7 @@ func contains(slice []string, item string) bool {
 // saveSentNews сохраняет отправленную новость в Redis с TTL 48 часов.
 func saveSentNews(ctx context.Context, redis *redis.Client, chatID int64, news string, logger *logger.Logger) error {
 	key := fmt.Sprintf("sent_news:%d", chatID)
-	duration := 48 * time.Hour
+	duration := 96 * time.Hour
 
 	_, err := redis.SAdd(ctx, key, news).Result()
 	if err != nil {
