@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"news_bot_project/logger"
 	"strconv"
 	"time"
@@ -128,31 +129,83 @@ func handleGetNews(chatID int64, bot *tgbotapi.BotAPI, redis *redis.Client, logg
 	sendMessage(chatID, news, bot, redis, logger, true)
 }
 
+// sendRandomNews отправляет случайную новость всем зарегистрированным чатам.
 func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, logger *logger.Logger, initial bool) {
-	// Получаем одну новость из Redis
 	ctx := context.Background()
-	news, err := redis.SRandMember(ctx, "news").Result()
+
+	// Получаем все новости из Redis
+	allNews, err := redis.SMembers(ctx, "news").Result()
 	if err != nil {
-		logger.Log("Ошибка при получении новости из Redis: " + err.Error())
+		logger.Log("Ошибка при получении всех новостей из Redis: " + err.Error())
 		return
 	}
 
+	// Получаем уже отправленные новости для каждого чата
 	chatIDs, err := redis.SMembers(ctx, "chat_ids").Result()
 	if err != nil {
 		logger.Log("Ошибка при получении идентификаторов чатов из Redis: " + err.Error())
 		return
 	}
 
+	// Выбираем случайную новость из доступных и инициализируем ее как пустую строку
+	var randomNews string
+
 	for _, chatIDStr := range chatIDs {
 		chatID, _ := strconv.ParseInt(chatIDStr, 10, 64)
-		sendMessage(chatID, news, bot, redis, logger, true)
+
+		// Получаем уже отправленные новости для данного чата
+		sentNews, err := redis.SMembers(ctx, fmt.Sprintf("sent_news:%d", chatID)).Result()
+		if err != nil {
+			logger.Log("Ошибка при получении отправленных новостей из Redis: " + err.Error())
+			continue
+		}
+
+		// Составляем список доступных новостей, исключая уже отправленные
+		availableNews := make([]string, 0)
+		for _, news := range allNews {
+			if !contains(sentNews, news) {
+				availableNews = append(availableNews, news)
+			}
+		}
+
+		// Проверяем, есть ли доступные новости для отправки
+		if len(availableNews) == 0 {
+			logger.Log(fmt.Sprintf("Нет доступных новостей для отправки в чат %d.", chatID))
+			continue
+		}
+
+		// Если нет отправленной новости для данного чата, выбираем случайную из доступных
+		if randomNews == "" {
+			randomNews = availableNews[rand.Intn(len(availableNews))]
+		}
+
+		// Отправляем новость чату
+		sendMessage(chatID, randomNews, bot, redis, logger, true)
+
+		// Добавляем идентификатор новости в таблицу отправленных новостей для данного чата
+		redis.SAdd(ctx, fmt.Sprintf("sent_news:%d", chatID), randomNews)
+	}
+
+	if randomNews == "" {
+		logger.Log("Нет доступных новостей для отправки.")
+		return
 	}
 
 	if initial {
 		logger.Log("Отправлена новость при подписке на бота.")
 	} else {
-		logger.Log("Отправлены новости всем зарегистрированным чатам.")
+		logger.Log("Отправлена новость всем зарегистрированным чатам.")
 	}
+}
+
+// Вспомогательная функция для проверки наличия элемента в срезе
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }
 
 // saveSentNews сохраняет отправленную новость в Redis с TTL 48 часов.
