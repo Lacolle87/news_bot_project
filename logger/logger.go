@@ -28,6 +28,22 @@ type Logger struct {
 	file   *lumberjack.Logger
 }
 
+// InitializeLoggerFromConfig загружает конфигурацию логгера из указанного JSON-файла,
+// инициализирует логгер на основе конфигурации и возвращает инициализированный логгер или ошибку.
+func InitializeLoggerFromConfig(configFile string) (*Logger, error) {
+	loggerConfig, err := LoadLoggerConfig(configFile)
+	if err != nil {
+		return nil, err
+	}
+
+	botLogger, err := SetupLogger(loggerConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return botLogger, nil
+}
+
 // NewLogger создает новый экземпляр логгера на основе переданных настроек.
 // Возвращает инициализированный логгер или ошибку, если не удалось настроить логгер.
 func SetupLogger(config LoggerConfig) (*Logger, error) {
