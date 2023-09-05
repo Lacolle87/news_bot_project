@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"news_bot_project/logger"
+	"news_bot_project/loader"
 	"strconv"
 	"time"
 
@@ -13,19 +13,19 @@ import (
 )
 
 // StartBot запускает новостного бота.
-func StartBot(redis *redis.Client, botToken string, botLogger *logger.Logger) error {
+func StartBot(redis *redis.Client, botToken string) error {
 	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
-		botLogger.Log("Ошибка при создании Telegram бота: " + err.Error())
+		loader.BotLogger.Log("Ошибка при создании Telegram бота: " + err.Error())
 		return err
 	}
 
 	bot.Debug = false
-	botLogger.Log("Бот запущен.")
+	loader.BotLogger.Log("Бот запущен.")
 
 	go func() {
 		for {
-			sendRandomNews(bot, redis, botLogger, false)
+			sendRandomNews(bot, redis, false)
 			time.Sleep(45 * time.Minute)
 		}
 	}()
@@ -35,7 +35,7 @@ func StartBot(redis *redis.Client, botToken string, botLogger *logger.Logger) er
 
 	updates, err := bot.GetUpdatesChan(u)
 	if err != nil {
-		botLogger.Log("Ошибка при получении обновлений от Telegram: " + err.Error())
+		loader.BotLogger.Log("Ошибка при получении обновлений от Telegram: " + err.Error())
 		return err
 	}
 
@@ -45,7 +45,7 @@ func StartBot(redis *redis.Client, botToken string, botLogger *logger.Logger) er
 		}
 
 		if update.Message.IsCommand() {
-			handleCommand(update.Message, bot, redis, botLogger)
+			handleCommand(update.Message, bot, redis)
 		}
 	}
 
@@ -53,97 +53,97 @@ func StartBot(redis *redis.Client, botToken string, botLogger *logger.Logger) er
 }
 
 // handleCommand обрабатывает команды от пользователя.
-func handleCommand(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis.Client, botLogger *logger.Logger) {
+func handleCommand(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis.Client) {
 	switch message.Command() {
 	case "start":
-		handleStart(message, bot, redis, botLogger)
+		handleStart(message, bot, redis)
 	case "getnews":
-		handleGetNews(message.Chat.ID, bot, redis, botLogger)
+		handleGetNews(message.Chat.ID, bot, redis)
 	default:
 		reply := "Неизвестная команда. Доступные команды: /start, /getnews"
-		sendMessage(message.Chat.ID, reply, bot, redis, botLogger, false)
+		sendMessage(message.Chat.ID, reply, bot, redis, false)
 	}
 }
 
 // sendMessage отправляет сообщение указанному chatID.
-func sendMessage(chatID int64, message string, bot *tgbotapi.BotAPI, redis *redis.Client, botLogger *logger.Logger, save bool) {
+func sendMessage(chatID int64, message string, bot *tgbotapi.BotAPI, redis *redis.Client, save bool) {
 	msg := tgbotapi.NewMessage(chatID, message)
 	_, err := bot.Send(msg)
 	if err != nil {
-		botLogger.Log("Ошибка при отправке сообщения: " + err.Error())
+		loader.BotLogger.Log("Ошибка при отправке сообщения: " + err.Error())
 		return
 	}
 
 	if save {
-		err = saveSentNews(context.Background(), redis, chatID, message, botLogger)
+		err = saveSentNews(context.Background(), redis, chatID, message)
 		if err != nil {
-			botLogger.Log("Ошибка при сохранении отправленного сообщения: " + err.Error())
+			loader.BotLogger.Log("Ошибка при сохранении отправленного сообщения: " + err.Error())
 		}
 	}
 }
 
-func handleStart(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis.Client, botLogger *logger.Logger) {
+func handleStart(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis.Client) {
 	chatID := message.Chat.ID
 
 	exists, err := redis.SIsMember(context.Background(), "chat_ids", strconv.FormatInt(chatID, 10)).Result()
 	if err != nil {
-		botLogger.Log("Ошибка при проверке идентификатора чата в Redis: " + err.Error())
+		loader.BotLogger.Log("Ошибка при проверке идентификатора чата в Redis: " + err.Error())
 		return
 	}
 
 	if exists {
 		reply := "Вы уже подписаны на новостного бота."
-		sendMessage(chatID, reply, bot, redis, botLogger, false)
+		sendMessage(chatID, reply, bot, redis, false)
 		return
 	}
 
 	_, err = redis.SAdd(context.Background(), "chat_ids", strconv.FormatInt(chatID, 10)).Result()
 	if err != nil {
-		botLogger.Log("Ошибка при сохранении идентификатора чата в Redis: " + err.Error())
+		loader.BotLogger.Log("Ошибка при сохранении идентификатора чата в Redis: " + err.Error())
 		return
 	}
 
-	err = createChatIDSnapshot(redis, botLogger) // Вызов функции createChatIDSnapshot
+	err = createChatIDSnapshot(redis) // Вызов функции createChatIDSnapshot
 	if err != nil {
-		botLogger.Log("Ошибка при создании снимка идентификаторов чатов: " + err.Error())
+		loader.BotLogger.Log("Ошибка при создании снимка идентификаторов чатов: " + err.Error())
 	}
 
 	reply := "Добро пожаловать! Вы успешно подписались на новостного бота."
-	sendMessage(chatID, reply, bot, redis, botLogger, false)
+	sendMessage(chatID, reply, bot, redis, false)
 
 	time.Sleep(5 * time.Second)
 
-	sendRandomNews(bot, redis, botLogger, true)
+	sendRandomNews(bot, redis, true)
 }
 
 // handleGetNews обрабатывает команду /getnews.
-func handleGetNews(chatID int64, bot *tgbotapi.BotAPI, redis *redis.Client, botLogger *logger.Logger) {
+func handleGetNews(chatID int64, bot *tgbotapi.BotAPI, redis *redis.Client) {
 	news, err := redis.SRandMember(context.Background(), "news").Result()
 	if err != nil {
-		botLogger.Log("Ошибка при получении новости из Redis: " + err.Error())
+		loader.BotLogger.Log("Ошибка при получении новости из Redis: " + err.Error())
 		reply := "Извините, пока нет доступных новостей."
-		sendMessage(chatID, reply, bot, redis, botLogger, false)
+		sendMessage(chatID, reply, bot, redis, false)
 		return
 	}
 
-	sendMessage(chatID, news, bot, redis, botLogger, true)
+	sendMessage(chatID, news, bot, redis, true)
 }
 
 // sendRandomNews отправляет случайную новость всем зарегистрированным чатам.
-func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, botLogger *logger.Logger, initial bool) {
+func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, initial bool) {
 	ctx := context.Background()
 
 	// Получаем все новости из Redis
 	allNews, err := redis.SMembers(ctx, "news").Result()
 	if err != nil {
-		botLogger.Log("Ошибка при получении всех новостей из Redis: " + err.Error())
+		loader.BotLogger.Log("Ошибка при получении всех новостей из Redis: " + err.Error())
 		return
 	}
 
 	// Получаем уже отправленные новости для каждого чата
 	chatIDs, err := redis.SMembers(ctx, "chat_ids").Result()
 	if err != nil {
-		botLogger.Log("Ошибка при получении идентификаторов чатов из Redis: " + err.Error())
+		loader.BotLogger.Log("Ошибка при получении идентификаторов чатов из Redis: " + err.Error())
 		return
 	}
 
@@ -156,7 +156,7 @@ func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, botLogger *logger
 		// Получаем уже отправленные новости для данного чата
 		sentNews, err := redis.SMembers(ctx, fmt.Sprintf("sent_news:%d", chatID)).Result()
 		if err != nil {
-			botLogger.Log("Ошибка при получении отправленных новостей из Redis: " + err.Error())
+			loader.BotLogger.Log("Ошибка при получении отправленных новостей из Redis: " + err.Error())
 			continue
 		}
 
@@ -170,7 +170,7 @@ func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, botLogger *logger
 
 		// Проверяем, есть ли доступные новости для отправки
 		if len(availableNews) == 0 {
-			botLogger.Log(fmt.Sprintf("Нет доступных новостей для отправки в чат %d.", chatID))
+			loader.BotLogger.Log(fmt.Sprintf("Нет доступных новостей для отправки в чат %d.", chatID))
 			continue
 		}
 
@@ -180,21 +180,21 @@ func sendRandomNews(bot *tgbotapi.BotAPI, redis *redis.Client, botLogger *logger
 		}
 
 		// Отправляем новость чату
-		sendMessage(chatID, randomNews, bot, redis, botLogger, true)
+		sendMessage(chatID, randomNews, bot, redis, true)
 
 		// Добавляем идентификатор новости в таблицу отправленных новостей для данного чата
 		redis.SAdd(ctx, fmt.Sprintf("sent_news:%d", chatID), randomNews)
 	}
 
 	if randomNews == "" {
-		botLogger.Log("Нет доступных новостей для отправки.")
+		loader.BotLogger.Log("Нет доступных новостей для отправки.")
 		return
 	}
 
 	if initial {
-		botLogger.Log("Отправлена новость при подписке на бота.")
+		loader.BotLogger.Log("Отправлена новость при подписке на бота.")
 	} else {
-		botLogger.Log("Отправлена новость всем зарегистрированным чатам.")
+		loader.BotLogger.Log("Отправлена новость всем зарегистрированным чатам.")
 	}
 }
 
@@ -209,28 +209,27 @@ func contains(slice []string, item string) bool {
 }
 
 // saveSentNews сохраняет отправленную новость в Redis с TTL 48 часов.
-func saveSentNews(ctx context.Context, redis *redis.Client, chatID int64, news string, botLogger *logger.Logger) error {
+func saveSentNews(ctx context.Context, redis *redis.Client, chatID int64, news string) error {
 	key := fmt.Sprintf("sent_news:%d", chatID)
 	duration := 96 * time.Hour
 
 	_, err := redis.SAdd(ctx, key, news).Result()
 	if err != nil {
-		botLogger.Log("Ошибка при сохранении отправленной новости в Redis: " + err.Error())
+		loader.BotLogger.Log("Ошибка при сохранении отправленной новости в Redis: " + err.Error())
 		return err
 	}
 
 	// Устанавливаем время жизни ключа
 	_, err = redis.Expire(ctx, key, duration).Result()
 	if err != nil {
-		botLogger.Log("Ошибка при установке TTL для ключа в Redis: " + err.Error())
+		loader.BotLogger.Log("Ошибка при установке TTL для ключа в Redis: " + err.Error())
 		return err
 	}
-
 	return nil
 }
 
 // createChatIDSnapshot создает снимок идентификаторов чатов, используя команду BGSAVE Redis.
-func createChatIDSnapshot(redis *redis.Client, botLogger *logger.Logger) error {
+func createChatIDSnapshot(redis *redis.Client) error {
 	ctx := context.Background()
 
 	// Запускаем фоновое сохранение набора данных
@@ -239,7 +238,7 @@ func createChatIDSnapshot(redis *redis.Client, botLogger *logger.Logger) error {
 		return err
 	}
 
-	botLogger.Log("Создан снимок идентификаторов чатов.")
+	loader.BotLogger.Log("Создан снимок идентификаторов чатов.")
 
 	return nil
 }

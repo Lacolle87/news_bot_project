@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"news_bot_project/loader"
 	"os"
 	"strings"
 	"time"
@@ -14,7 +15,6 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
 	"news_bot_project/bot"
-	"news_bot_project/logger"
 )
 
 // Замените эти значения на свои
@@ -22,8 +22,6 @@ var (
 	redisHost     string
 	redisPassword string
 )
-
-const configFile = "config/logger_config.json"
 
 // RSS Замените на свои структуры, соответствующие структуре XML-данных RSS-канала
 type RSS struct {
@@ -42,24 +40,19 @@ type Item struct {
 
 func main() {
 
-	botLogger, err := logger.InitializeLoggerFromConfig(configFile)
+	// Загрузка логгера
+	err := loader.LoadLoggerFromConfig()
 	if err != nil {
-		log.Fatal("Ошибка при инициализации логгера:", err)
+		log.Println(err)
 	}
-	defer func(botLogger *logger.Logger) {
-		err := botLogger.Close()
-		if err != nil {
-			log.Fatal("Ошибка при закрытие логгера:", err)
-		}
-	}(botLogger)
 
 	err = godotenv.Load()
 	if err != nil {
-		botLogger.Log("Ошибка при загрузке файла .env: " + err.Error())
+		loader.BotLogger.Log("Ошибка при загрузке файла .env: " + err.Error())
 		return
 	}
 
-	botLogger.Log("Программа запущена. Новостной бот начинает работу.")
+	loader.BotLogger.Log("Программа запущена. Новостной бот начинает работу.")
 
 	redisHost = os.Getenv("REDIS_HOST")
 	redisPassword = os.Getenv("REDIS_PASSWORD")
@@ -69,25 +62,25 @@ func main() {
 	defer func(redisClient *redis.Client) {
 		err := redisClient.Close()
 		if err != nil {
-			botLogger.Log("Ошибка закрытия соединения Redis" + err.Error())
+			loader.BotLogger.Log("Ошибка закрытия соединения Redis" + err.Error())
 		}
 	}(redisClient)
 
-	processNews(redisClient, botLogger)
+	processNews(redisClient)
 
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
 
 		for range ticker.C {
-			processNews(redisClient, botLogger)
+			processNews(redisClient)
 		}
 	}()
 
 	go func() {
-		err := bot.StartBot(redisClient, botToken, botLogger)
+		err := bot.StartBot(redisClient, botToken)
 		if err != nil {
-			botLogger.Log("Ошибка при запуске бота: " + err.Error())
+			loader.BotLogger.Log("Ошибка при запуске бота: " + err.Error())
 			return
 		}
 	}()
@@ -113,13 +106,13 @@ func setupRedisClient() *redis.Client {
 }
 
 // processNews обрабатывает новостные данные из RSS-ленты и сохраняет их в Redis.
-func processNews(redisClient *redis.Client, botLogger *logger.Logger) {
+func processNews(redisClient *redis.Client) {
 	ctx := context.Background()
 
 	// Получаем данные RSS
-	rssData, err := fetchRSS(botLogger)
+	rssData, err := fetchRSS()
 	if err != nil {
-		botLogger.Log("Ошибка при получении данных RSS: " + err.Error())
+		loader.BotLogger.Log("Ошибка при получении данных RSS: " + err.Error())
 		return
 	}
 
@@ -127,7 +120,7 @@ func processNews(redisClient *redis.Client, botLogger *logger.Logger) {
 	rss := RSS{}
 	err = xml.Unmarshal([]byte(rssData), &rss)
 	if err != nil {
-		botLogger.Log("Ошибка при разборе данных RSS: " + err.Error())
+		loader.BotLogger.Log("Ошибка при разборе данных RSS: " + err.Error())
 		return
 	}
 
@@ -144,15 +137,15 @@ func processNews(redisClient *redis.Client, botLogger *logger.Logger) {
 
 		exists, err := redisClient.SIsMember(ctx, "news", newsKey).Result()
 		if err != nil {
-			botLogger.Log("Ошибка Redis SIsMember: " + err.Error())
+			loader.BotLogger.Log("Ошибка Redis SIsMember: " + err.Error())
 			continue
 		}
 
 		// Если новость не существует в Redis, сохраняем её
 		if !exists {
-			err := saveNewsToRedis(ctx, redisClient, item, botLogger)
+			err := saveNewsToRedis(ctx, redisClient, item)
 			if err != nil {
-				botLogger.Log("Ошибка при сохранении новости в Redis: " + err.Error())
+				loader.BotLogger.Log("Ошибка при сохранении новости в Redis: " + err.Error())
 				continue
 			}
 			addedCount++ // Увеличиваем счетчик добавленных новостей
@@ -161,33 +154,33 @@ func processNews(redisClient *redis.Client, botLogger *logger.Logger) {
 
 	// Выводим количество добавленных новостей
 	if addedCount > 0 {
-		botLogger.Log(fmt.Sprintf("Добавлено новостей: %d", addedCount))
+		loader.BotLogger.Log(fmt.Sprintf("Добавлено новостей: %d", addedCount))
 	}
 }
 
-func fetchRSS(botLogger *logger.Logger) (string, error) {
+func fetchRSS() (string, error) {
 	resp, err := http.Get("https://news.mail.ru/rss/")
 	if err != nil {
-		botLogger.Log("Ошибка при получении данных RSS: " + err.Error())
+		loader.BotLogger.Log("Ошибка при получении данных RSS: " + err.Error())
 		return "", err
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			botLogger.Log("Ошибка при закрытии тела ответа: " + err.Error())
+			loader.BotLogger.Log("Ошибка при закрытии тела ответа: " + err.Error())
 		}
 	}(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		botLogger.Log("Ошибка при чтении тела ответа RSS: " + err.Error())
+		loader.BotLogger.Log("Ошибка при чтении тела ответа RSS: " + err.Error())
 		return "", err
 	}
 
 	return string(body), nil
 }
 
-func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item, botLogger *logger.Logger) error {
+func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item) error {
 	newsText := item.Title
 	if len(newsText) > 0 {
 		lastChar := newsText[len(newsText)-1]
@@ -202,14 +195,14 @@ func saveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item, 
 
 	err := redisClient.SAdd(ctx, "news", newsText).Err()
 	if err != nil {
-		botLogger.Log("Ошибка при сохранении новости в Redis: " + err.Error())
+		loader.BotLogger.Log("Ошибка при сохранении новости в Redis: " + err.Error())
 		return err
 	}
 
 	expiration := 48 * time.Hour
 	err = redisClient.Expire(ctx, "news", expiration).Err()
 	if err != nil {
-		botLogger.Log("Ошибка при установке срока годности для новости в Redis: " + err.Error())
+		loader.BotLogger.Log("Ошибка при установке срока годности для новости в Redis: " + err.Error())
 		return err
 	}
 
