@@ -2,7 +2,10 @@ package loader
 
 import (
 	"fmt"
-	"news_bot_project/logger"
+	"github.com/joho/godotenv"
+	"news_bot_project/pkg/logger"
+	"news_bot_project/pkg/redis"
+	"os"
 )
 
 const configFilePath = "config/logger_config.json"
@@ -17,4 +20,18 @@ func LoadLoggerFromConfig() error {
 	}
 	BotLogger = botLogger
 	return nil
+}
+
+func Loader() (string, error) {
+	err := godotenv.Load()
+	if err != nil {
+		BotLogger.Log("Ошибка при загрузке файла .env: " + err.Error())
+		return "", err
+	}
+
+	redispkg.RedisHost = os.Getenv("REDIS_HOST")
+	redispkg.RedisPassword = os.Getenv("REDIS_PASSWORD")
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+
+	return botToken, err
 }

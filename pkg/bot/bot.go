@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"news_bot_project/loader"
+	"news_bot_project/pkg/loader"
 	"strconv"
 	"time"
 
