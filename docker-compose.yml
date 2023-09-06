@@ -15,8 +15,7 @@ services:
       timeout: 3s
       retries: 10
     volumes:
-      - /path/to/local/data:/root/redis
-      - /path/to/local/redis.conf:/usr/local/etc/redis/redis.conf
+      - redis-data:/data
   news-bot-app:
     build:
       context: .
