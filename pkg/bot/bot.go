@@ -213,18 +213,10 @@ func contains(slice []string, item string) bool {
 // saveSentNews сохраняет отправленную новость в Redis с TTL 48 часов.
 func saveSentNews(ctx context.Context, redis *redis.Client, chatID int64, news string) error {
 	key := fmt.Sprintf("sent_news:%d", chatID)
-	duration := 48 * time.Hour
 
 	_, err := redis.SAdd(ctx, key, news).Result()
 	if err != nil {
 		loader.BotLogger.Log("Ошибка при сохранении отправленной новости в Redis: " + err.Error())
-		return err
-	}
-
-	// Устанавливаем время жизни ключа
-	_, err = redis.Expire(ctx, key, duration).Result()
-	if err != nil {
-		loader.BotLogger.Log("Ошибка при установке TTL для ключа в Redis: " + err.Error())
 		return err
 	}
 	return nil

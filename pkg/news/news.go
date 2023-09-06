@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"news_bot_project/pkg/loader"
 	"strings"
-	"time"
 )
 
 type RSS struct {
@@ -119,13 +118,6 @@ func SaveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item) 
 	err := redisClient.SAdd(ctx, "news", newsText).Err()
 	if err != nil {
 		loader.BotLogger.Log("Ошибка при сохранении новости в Redis: " + err.Error())
-		return err
-	}
-
-	expiration := 48 * time.Hour
-	err = redisClient.Expire(ctx, "news", expiration).Err()
-	if err != nil {
-		loader.BotLogger.Log("Ошибка при установке срока годности для новости в Redis: " + err.Error())
 		return err
 	}
 
