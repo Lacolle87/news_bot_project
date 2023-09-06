@@ -26,7 +26,7 @@ func StartBot(redis *redis.Client, botToken string) error {
 	go func() {
 		for {
 			sendRandomNews(bot, redis, false)
-			time.Sleep(1 * time.Minute)
+			time.Sleep(60 * time.Minute)
 		}
 	}()
 
