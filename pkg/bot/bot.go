@@ -26,7 +26,7 @@ func StartBot(redis *redis.Client, botToken string) error {
 	go func() {
 		for {
 			sendRandomNews(bot, redis, false)
-			time.Sleep(45 * time.Minute)
+			time.Sleep(1 * time.Minute)
 		}
 	}()
 
@@ -82,6 +82,7 @@ func sendMessage(chatID int64, message string, bot *tgbotapi.BotAPI, redis *redi
 	}
 }
 
+// handleStart обрабатывает команду /start
 func handleStart(message *tgbotapi.Message, bot *tgbotapi.BotAPI, redis *redis.Client) {
 	chatID := message.Chat.ID
 
@@ -127,6 +128,7 @@ func handleGetNews(chatID int64, bot *tgbotapi.BotAPI, redis *redis.Client) {
 	}
 
 	sendMessage(chatID, news, bot, redis, true)
+	loader.BotLogger.Log(fmt.Sprintf("Новость отправлена по запросу: %d", chatID))
 }
 
 // sendRandomNews отправляет случайную новость всем зарегистрированным чатам.
@@ -211,7 +213,7 @@ func contains(slice []string, item string) bool {
 // saveSentNews сохраняет отправленную новость в Redis с TTL 48 часов.
 func saveSentNews(ctx context.Context, redis *redis.Client, chatID int64, news string) error {
 	key := fmt.Sprintf("sent_news:%d", chatID)
-	duration := 96 * time.Hour
+	duration := 48 * time.Hour
 
 	_, err := redis.SAdd(ctx, key, news).Result()
 	if err != nil {

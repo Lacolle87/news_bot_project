@@ -11,6 +11,7 @@ var (
 	RedisPassword string
 )
 
+// SetupRedisClient создает и настраивает клиент Redis для подключения к серверу Redis.
 func SetupRedisClient() *redis.Client {
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:            RedisHost,

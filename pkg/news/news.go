@@ -79,6 +79,7 @@ func ProcessNews(redisClient *redis.Client) {
 	}
 }
 
+// FetchRSS получает данные из RSS-ленты
 func FetchRSS() (string, error) {
 	resp, err := http.Get("https://news.mail.ru/rss/")
 	if err != nil {
@@ -101,6 +102,7 @@ func FetchRSS() (string, error) {
 	return string(body), nil
 }
 
+// SaveNewsToRedis сохраняет новость в хранилище Redis
 func SaveNewsToRedis(ctx context.Context, redisClient *redis.Client, item Item) error {
 	newsText := item.Title
 	if len(newsText) > 0 {

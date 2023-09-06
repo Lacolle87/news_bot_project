@@ -22,6 +22,7 @@ func LoadLoggerFromConfig() error {
 	return nil
 }
 
+// Loader загружает переменные окружения
 func Loader() (string, error) {
 	err := godotenv.Load()
 	if err != nil {
